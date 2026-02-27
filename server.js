@@ -25,6 +25,11 @@ app.setPath('userData', freshUserData);
 const PORT = process.env.PORT || 3000;
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 const MAX_TOKENS_PER_REQUEST = 30;
+const MAX_TOKENS_BEFORE_RESTART = 5;
+const MIN_COOLDOWN_MS = 3000;
+
+let tokenServed = 0;
+let lastTokenTime = 0;
 
 // ─── API Key Store ────────────────────────────────────────────────────────────
 
@@ -134,18 +139,33 @@ async function handleRequest(req, res) {
             error: `Rate limit exceeded. Resets in ${rl.resetIn}s.`,
         });
 
+        // Cooldown antar request
+        const elapsed = Date.now() - lastTokenTime;
+        if (lastTokenTime > 0 && elapsed < MIN_COOLDOWN_MS) {
+            const waitMs = MIN_COOLDOWN_MS - elapsed;
+            console.log(`[API] ⏳ Cooldown ${waitMs}ms...`);
+            await new Promise(r => setTimeout(r, waitMs));
+        }
+        lastTokenTime = Date.now();
+
         try {
-            console.log(`[API] Generating token for key "${auth.keyData.name}"...`);
+            console.log(`[API] Generating token for key "${auth.keyData.name}" (${tokenServed + 1}/${MAX_TOKENS_BEFORE_RESTART})...`);
             const [token] = await generateRecaptchaTokens(1);
+            tokenServed++;
             send(res, 200, {
                 success: true,
                 token,
                 generatedAt: new Date().toISOString(),
                 rateLimit: { remaining: rl.remaining, resetIn: rl.resetIn },
+                session: { served: tokenServed, maxBeforeRestart: MAX_TOKENS_BEFORE_RESTART },
             });
-            // Restart browser setelah token dikirim
-            console.log('[API] 🔄 Restarting browser (fresh session)...');
-            destroyBrowser();
+
+            // Hybrid restart: setelah N token, exit agar wrapper script restart
+            if (tokenServed >= MAX_TOKENS_BEFORE_RESTART) {
+                console.log(`[API] 🔄 Served ${tokenServed} tokens, exiting for fresh restart...`);
+                destroyBrowser();
+                setTimeout(() => process.exit(0), 500);
+            }
             return;
         } catch (err) {
             console.error('[API] Token generation failed:', err.message);
@@ -166,19 +186,34 @@ async function handleRequest(req, res) {
             error: `Rate limit exceeded. Resets in ${rl.resetIn}s.`,
         });
 
+        // Cooldown antar request
+        const elapsed = Date.now() - lastTokenTime;
+        if (lastTokenTime > 0 && elapsed < MIN_COOLDOWN_MS) {
+            const waitMs = MIN_COOLDOWN_MS - elapsed;
+            console.log(`[API] ⏳ Cooldown ${waitMs}ms...`);
+            await new Promise(r => setTimeout(r, waitMs));
+        }
+        lastTokenTime = Date.now();
+
         try {
-            console.log(`[API] Generating ${count} token(s) for key "${auth.keyData.name}"...`);
+            console.log(`[API] Generating ${count} token(s) for key "${auth.keyData.name}" (${tokenServed + count}/${MAX_TOKENS_BEFORE_RESTART})...`);
             const tokens = await generateRecaptchaTokens(count);
+            tokenServed += count;
             send(res, 200, {
                 success: true,
                 tokens,
                 count: tokens.length,
                 generatedAt: new Date().toISOString(),
                 rateLimit: { remaining: rl.remaining, resetIn: rl.resetIn },
+                session: { served: tokenServed, maxBeforeRestart: MAX_TOKENS_BEFORE_RESTART },
             });
-            // Restart browser setelah tokens dikirim
-            console.log('[API] 🔄 Restarting browser (fresh session)...');
-            destroyBrowser();
+
+            // Hybrid restart: setelah N token, exit agar wrapper script restart
+            if (tokenServed >= MAX_TOKENS_BEFORE_RESTART) {
+                console.log(`[API] 🔄 Served ${tokenServed} tokens, exiting for fresh restart...`);
+                destroyBrowser();
+                setTimeout(() => process.exit(0), 500);
+            }
             return;
         } catch (err) {
             console.error('[API] Token generation failed:', err.message);

@@ -57,8 +57,14 @@ BEARER_TOKEN=ya29.xxxxx_token_kamu_disini
 
 ## Step 5: Jalankan Server
 
+**Gunakan `start.bat` (recommended)** — server auto-restart setiap 5 token untuk fresh session:
 ```powershell
 cd C:\Users\%USERNAME%\Desktop\rechaptcha
+start.bat
+```
+
+Atau cara lama (tanpa auto-restart):
+```powershell
 npm run server
 ```
 
@@ -66,6 +72,8 @@ Kalau sukses, akan muncul:
 ```
 🚀 reCAPTCHA Token API running at http://localhost:3000
 ```
+
+> **Note:** Dengan `start.bat`, server otomatis restart setiap 5 token untuk menghindari reCAPTCHA detection.
 
 ---
 

@@ -107,6 +107,11 @@ async function generateRecaptchaTokens(count = 1) {
 
     console.log(`[RECAPTCHA] Executing ${count} token(s) in parallel (browser reused)...`);
 
+    // Human-like delay sebelum execute (1-4 detik random)
+    const humanDelay = 1000 + Math.random() * 3000;
+    console.log(`[RECAPTCHA] ⏳ Human-like delay ${Math.round(humanDelay)}ms...`);
+    await delay(humanDelay);
+
     try {
         const tokens = await view.webContents.executeJavaScript(`
             (function() {
