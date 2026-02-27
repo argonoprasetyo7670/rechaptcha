@@ -1,0 +1,268 @@
+/**
+ * server.js — reCAPTCHA Token REST API Service
+ * Jalankan: npx electron server.js
+ *
+ * Endpoints:
+ *   GET  /health              → status server (no auth)
+ *   GET  /token               → generate 1 token
+ *   GET  /tokens?count=N      → generate N token (max 30)
+ *   GET  /keys                → list API keys (admin only)
+ *   POST /keys                → tambah API key baru (admin only)
+ *   DELETE /keys/:key         → hapus API key (admin only)
+ */
+
+const path = require('path');
+const os = require('os');
+const http = require('http');
+const fs = require('fs');
+const { app } = require('electron');
+const { generateRecaptchaTokens, destroyBrowser } = require('./recaptcha');
+
+// Fresh userData tiap run
+const freshUserData = path.join(os.tmpdir(), `electron-srv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+app.setPath('userData', freshUserData);
+
+const PORT = process.env.PORT || 3000;
+const KEYS_FILE = path.join(__dirname, 'keys.json');
+const MAX_TOKENS_PER_REQUEST = 30;
+
+// ─── API Key Store ────────────────────────────────────────────────────────────
+
+function loadKeys() {
+    try {
+        return JSON.parse(fs.readFileSync(KEYS_FILE, 'utf8'));
+    } catch {
+        return { keys: {} };
+    }
+}
+
+function saveKeys(data) {
+    fs.writeFileSync(KEYS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function getKey(apiKey) {
+    const data = loadKeys();
+    return data.keys[apiKey] || null;
+}
+
+// ─── Rate Limiter (in-memory, per API key, per minute) ────────────────────────
+
+const rateLimitMap = new Map(); // apiKey → { count, resetAt }
+
+function checkRateLimit(apiKey, limitPerMinute) {
+    const now = Date.now();
+    let entry = rateLimitMap.get(apiKey);
+
+    if (!entry || now > entry.resetAt) {
+        entry = { count: 0, resetAt: now + 60_000 };
+    }
+
+    if (entry.count >= limitPerMinute) {
+        return { allowed: false, remaining: 0, resetIn: Math.ceil((entry.resetAt - now) / 1000) };
+    }
+
+    entry.count++;
+    rateLimitMap.set(apiKey, entry);
+    return { allowed: true, remaining: limitPerMinute - entry.count, resetIn: Math.ceil((entry.resetAt - now) / 1000) };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function send(res, status, body) {
+    res.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'X-API-Key, Content-Type',
+    });
+    res.end(JSON.stringify(body, null, 2));
+}
+
+function parseBody(req) {
+    return new Promise((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => {
+            try { resolve(JSON.parse(data)); } catch { resolve({}); }
+        });
+    });
+}
+
+function authMiddleware(req) {
+    const apiKey = req.headers['x-api-key'] || new URL(req.url, 'http://localhost').searchParams.get('apikey');
+    if (!apiKey) return { ok: false, reason: 'Missing API key. Use X-API-Key header or ?apikey= query param.' };
+
+    const keyData = getKey(apiKey);
+    if (!keyData) return { ok: false, reason: 'Invalid API key.' };
+
+    return { ok: true, apiKey, keyData };
+}
+
+function generateApiKey() {
+    return 'sk-' + [...Array(32)].map(() => Math.random().toString(36)[2]).join('');
+}
+
+// ─── Request Handler ──────────────────────────────────────────────────────────
+
+async function handleRequest(req, res) {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const pathname = url.pathname;
+    const method = req.method;
+
+    console.log(`[API] ${method} ${pathname}`);
+
+    // CORS preflight
+    if (method === 'OPTIONS') return send(res, 204, {});
+
+    // ── GET /health ─────────────────────────────────────────────────────────
+    if (method === 'GET' && pathname === '/health') {
+        return send(res, 200, {
+            success: true,
+            status: 'ok',
+            service: 'reCAPTCHA Token API',
+            timestamp: new Date().toISOString(),
+        });
+    }
+
+    // ── GET /token ──────────────────────────────────────────────────────────
+    if (method === 'GET' && pathname === '/token') {
+        const auth = authMiddleware(req);
+        if (!auth.ok) return send(res, 401, { success: false, error: auth.reason });
+
+        const rl = checkRateLimit(auth.apiKey, auth.keyData.limitPerMinute);
+        if (!rl.allowed) return send(res, 429, {
+            success: false,
+            error: `Rate limit exceeded. Resets in ${rl.resetIn}s.`,
+        });
+
+        try {
+            console.log(`[API] Generating token for key "${auth.keyData.name}"...`);
+            const [token] = await generateRecaptchaTokens(1);
+            return send(res, 200, {
+                success: true,
+                token,
+                generatedAt: new Date().toISOString(),
+                rateLimit: { remaining: rl.remaining, resetIn: rl.resetIn },
+            });
+        } catch (err) {
+            console.error('[API] Token generation failed:', err.message);
+            return send(res, 500, { success: false, error: err.message });
+        }
+    }
+
+    // ── GET /tokens?count=N ─────────────────────────────────────────────────
+    if (method === 'GET' && pathname === '/tokens') {
+        const auth = authMiddleware(req);
+        if (!auth.ok) return send(res, 401, { success: false, error: auth.reason });
+
+        const count = Math.min(MAX_TOKENS_PER_REQUEST, Math.max(1, parseInt(url.searchParams.get('count')) || 1));
+
+        const rl = checkRateLimit(auth.apiKey, auth.keyData.limitPerMinute);
+        if (!rl.allowed) return send(res, 429, {
+            success: false,
+            error: `Rate limit exceeded. Resets in ${rl.resetIn}s.`,
+        });
+
+        try {
+            console.log(`[API] Generating ${count} token(s) for key "${auth.keyData.name}"...`);
+            const tokens = await generateRecaptchaTokens(count);
+            return send(res, 200, {
+                success: true,
+                tokens,
+                count: tokens.length,
+                generatedAt: new Date().toISOString(),
+                rateLimit: { remaining: rl.remaining, resetIn: rl.resetIn },
+            });
+        } catch (err) {
+            console.error('[API] Token generation failed:', err.message);
+            return send(res, 500, { success: false, error: err.message });
+        }
+    }
+
+    // ── GET /keys (admin) ───────────────────────────────────────────────────
+    if (method === 'GET' && pathname === '/keys') {
+        const auth = authMiddleware(req);
+        if (!auth.ok) return send(res, 401, { success: false, error: auth.reason });
+        if (!auth.keyData.isAdmin) return send(res, 403, { success: false, error: 'Admin only.' });
+
+        const data = loadKeys();
+        const list = Object.entries(data.keys).map(([k, v]) => ({ key: k, ...v }));
+        return send(res, 200, { success: true, count: list.length, keys: list });
+    }
+
+    // ── POST /keys (admin) — tambah key baru ────────────────────────────────
+    if (method === 'POST' && pathname === '/keys') {
+        const auth = authMiddleware(req);
+        if (!auth.ok) return send(res, 401, { success: false, error: auth.reason });
+        if (!auth.keyData.isAdmin) return send(res, 403, { success: false, error: 'Admin only.' });
+
+        const body = await parseBody(req);
+        const newKey = generateApiKey();
+        const data = loadKeys();
+
+        data.keys[newKey] = {
+            name: body.name || 'unnamed',
+            isAdmin: body.isAdmin || false,
+            limitPerMinute: body.limitPerMinute || 100,
+            createdAt: new Date().toISOString().split('T')[0],
+        };
+
+        saveKeys(data);
+        console.log(`[API] New key created: ${newKey} (${data.keys[newKey].name})`);
+        return send(res, 201, { success: true, key: newKey, ...data.keys[newKey] });
+    }
+
+    // ── DELETE /keys/:key (admin) ────────────────────────────────────────────
+    if (method === 'DELETE' && pathname.startsWith('/keys/')) {
+        const auth = authMiddleware(req);
+        if (!auth.ok) return send(res, 401, { success: false, error: auth.reason });
+        if (!auth.keyData.isAdmin) return send(res, 403, { success: false, error: 'Admin only.' });
+
+        const targetKey = pathname.replace('/keys/', '');
+        const data = loadKeys();
+
+        if (!data.keys[targetKey]) return send(res, 404, { success: false, error: 'Key not found.' });
+        if (targetKey === auth.apiKey) return send(res, 400, { success: false, error: 'Cannot delete your own key.' });
+
+        const deleted = data.keys[targetKey];
+        delete data.keys[targetKey];
+        saveKeys(data);
+
+        console.log(`[API] Key deleted: ${targetKey} (${deleted.name})`);
+        return send(res, 200, { success: true, deleted: { key: targetKey, ...deleted } });
+    }
+
+    // 404
+    return send(res, 404, {
+        success: false,
+        error: 'Endpoint not found.',
+        endpoints: ['GET /health', 'GET /token', 'GET /tokens?count=N', 'GET /keys', 'POST /keys', 'DELETE /keys/:key'],
+    });
+}
+
+// ─── Start Server ─────────────────────────────────────────────────────────────
+
+app.on('window-all-closed', () => { });
+
+app.whenReady().then(() => {
+    const server = http.createServer(handleRequest);
+
+    server.listen(PORT, () => {
+        console.log(`\n🚀 reCAPTCHA Token API running at http://localhost:${PORT}`);
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`📌 Endpoints:`);
+        console.log(`   GET  /health`);
+        console.log(`   GET  /token             (X-API-Key required)`);
+        console.log(`   GET  /tokens?count=N    (X-API-Key required)`);
+        console.log(`   GET  /keys              (admin only)`);
+        console.log(`   POST /keys              (admin only)`);
+        console.log(`   DELETE /keys/:key       (admin only)`);
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`🔑 Default admin key: sk-admin-change-me`);
+        console.log(`   Edit keys.json untuk ganti API keys!\n`);
+    });
+
+    app.on('before-quit', () => {
+        destroyBrowser();
+        server.close();
+    });
+});

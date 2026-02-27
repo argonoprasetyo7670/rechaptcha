@@ -1,0 +1,16 @@
+{
+    "keys": {
+        "sk-admin-change-me": {
+            "name": "admin",
+            "isAdmin": true,
+            "limitPerMinute": 9999,
+            "createdAt": "2026-02-27"
+        },
+        "sk-app1-change-me": {
+            "name": "app-1",
+            "isAdmin": false,
+            "limitPerMinute": 100,
+            "createdAt": "2026-02-27"
+        }
+    }
+}

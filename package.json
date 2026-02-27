@@ -1,0 +1,19 @@
+{
+  "name": "recapchaprovider",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron main.js",
+    "server": "electron server.js",
+    "generate": "node generate.js",
+    "test": "node test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^40.6.1"
+  }
+}
