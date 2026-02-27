@@ -246,8 +246,8 @@ app.on('window-all-closed', () => { });
 app.whenReady().then(() => {
     const server = http.createServer(handleRequest);
 
-    server.listen(PORT, () => {
-        console.log(`\n🚀 reCAPTCHA Token API running at http://localhost:${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`\n🚀 reCAPTCHA Token API running at http://0.0.0.0:${PORT}`);
         console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
         console.log(`📌 Endpoints:`);
         console.log(`   GET  /health`);
