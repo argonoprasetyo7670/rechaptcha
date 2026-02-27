@@ -1,6 +1,7 @@
 /**
- * recaptcha.js
+ * recaptcha-image.js
  * reCAPTCHA Enterprise Token Generator — Anti-Detection Mode
+ * ACTION: IMAGE_GENERATION
  *
  * Fitur anti-detection:
  *  1. Random User-Agent per session
@@ -14,7 +15,7 @@ const { BrowserWindow, BrowserView, app } = require('electron');
 
 const CONFIG = {
     SITEKEY: '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV',
-    ACTION: 'VIDEO_GENERATION',
+    ACTION: 'IMAGE_GENERATION',
     LABS_URL: 'https://labs.google/fx/tools/flow',
     INIT_TIMEOUT_MS: 90000,
     TOKEN_TIMEOUT_MS: 30000,
@@ -37,14 +38,14 @@ function getRandomUA() {
 }
 
 // ─── Persistent state ─────────────────────────────────────────────────────────
-let _state = null;
+let _stateImg = null;
 
-async function ensureBrowser() {
-    if (_state && !_state.win.isDestroyed()) return _state;
+async function ensureBrowserImg() {
+    if (_stateImg && !_stateImg.win.isDestroyed()) return _stateImg;
 
     const ua = getRandomUA();
-    console.log('[RECAPTCHA] 🚀 Initializing browser...');
-    console.log(`[RECAPTCHA] 🌐 User-Agent: ${ua.substring(0, 60)}...`);
+    console.log('[RECAPTCHA-IMG] 🚀 Initializing browser...');
+    console.log(`[RECAPTCHA-IMG] 🌐 User-Agent: ${ua.substring(0, 60)}...`);
 
     const win = new BrowserWindow({
         show: false,
@@ -54,8 +55,8 @@ async function ensureBrowser() {
     });
 
     win.on('closed', () => {
-        console.log('[RECAPTCHA] ⚠️  Browser closed, resetting state...');
-        _state = null;
+        console.log('[RECAPTCHA-IMG] ⚠️  Browser closed, resetting state...');
+        _stateImg = null;
     });
 
     // Partition random per server run → fresh session tiap restart
@@ -79,40 +80,40 @@ async function ensureBrowser() {
     // ── Inject fingerprint spoofing SEBELUM page load ──────────────────────
     await injectFingerprintSpoofing(view.webContents);
 
-    console.log('[RECAPTCHA] Loading labs.google...');
+    console.log('[RECAPTCHA-IMG] Loading labs.google...');
     await view.webContents.loadURL(CONFIG.LABS_URL);
 
     // Tunggu page settle (seperti user baru buka tab)
     const settleDelay = 2000 + Math.random() * 3000;
-    console.log(`[RECAPTCHA] ⏳ Page settle ${Math.round(settleDelay)}ms...`);
+    console.log(`[RECAPTCHA-IMG] ⏳ Page settle ${Math.round(settleDelay)}ms...`);
     await delay(settleDelay);
 
-    console.log('[RECAPTCHA] Waiting for grecaptcha.enterprise...');
+    console.log('[RECAPTCHA-IMG] Waiting for grecaptcha.enterprise...');
     await waitForRecaptcha(view.webContents, CONFIG.INIT_TIMEOUT_MS);
 
     // Simulasi user browsing setelah page ready
     await simulateUserInteraction(view.webContents);
 
-    _state = { win, view };
-    console.log('[RECAPTCHA] ✅ Browser ready!');
-    return _state;
+    _stateImg = { win, view };
+    console.log('[RECAPTCHA-IMG] ✅ Browser ready!');
+    return _stateImg;
 }
 
-function destroyBrowser() {
-    if (_state) {
-        try { if (!_state.win.isDestroyed()) _state.win.destroy(); } catch (_) { }
-        _state = null;
-        console.log('[RECAPTCHA] Browser destroyed.');
+function destroyBrowserImg() {
+    if (_stateImg) {
+        try { if (!_stateImg.win.isDestroyed()) _stateImg.win.destroy(); } catch (_) { }
+        _stateImg = null;
+        console.log('[RECAPTCHA-IMG] Browser destroyed.');
     }
 }
 
-app.on('before-quit', destroyBrowser);
+app.on('before-quit', destroyBrowserImg);
 
 // ─── User Interaction Simulation ──────────────────────────────────────────────
 
 async function simulateUserInteraction(webContents) {
     try {
-        console.log('[RECAPTCHA] 🖱️  Simulating user interaction...');
+        console.log('[RECAPTCHA-IMG] 🖱️  Simulating user interaction...');
 
         // 1. Simulasi mouse movements (random positions)
         for (let i = 0; i < 3 + Math.floor(Math.random() * 4); i++) {
@@ -153,21 +154,21 @@ async function simulateUserInteraction(webContents) {
             await delay(150 + Math.random() * 400);
         }
 
-        console.log('[RECAPTCHA] 🖱️  User interaction done.');
+        console.log('[RECAPTCHA-IMG] 🖱️  User interaction done.');
     } catch (err) {
-        console.warn('[RECAPTCHA] ⚠️  Interaction simulation failed (non-fatal):', err.message);
+        console.warn('[RECAPTCHA-IMG] ⚠️  Interaction simulation failed (non-fatal):', err.message);
     }
 }
 
 // ─── Token Generator ──────────────────────────────────────────────────────────
 
-async function generateRecaptchaTokens(count = 1) {
+async function generateRecaptchaTokensImg(count = 1) {
     let state;
     try {
-        state = await ensureBrowser();
+        state = await ensureBrowserImg();
     } catch (err) {
-        console.error('[RECAPTCHA] ❌ Failed to init browser:', err.message);
-        _state = null;
+        console.error('[RECAPTCHA-IMG] ❌ Failed to init browser:', err.message);
+        _stateImg = null;
         throw err;
     }
 
@@ -179,7 +180,7 @@ async function generateRecaptchaTokens(count = 1) {
     ).catch(() => false);
 
     if (!isReady) {
-        console.warn('[RECAPTCHA] ⚠️  grecaptcha hilang, reload halaman...');
+        console.warn('[RECAPTCHA-IMG] ⚠️  grecaptcha hilang, reload halaman...');
         await view.webContents.loadURL(CONFIG.LABS_URL);
         await delay(2000 + Math.random() * 2000);
         await waitForRecaptcha(view.webContents, CONFIG.INIT_TIMEOUT_MS);
@@ -189,7 +190,7 @@ async function generateRecaptchaTokens(count = 1) {
     // Simulasi interaksi sebelum tiap execute (seperti user klik tombol)
     await simulatePreExecuteAction(view.webContents);
 
-    console.log(`[RECAPTCHA] Executing ${count} token(s)...`);
+    console.log(`[RECAPTCHA-IMG] Executing ${count} token(s)...`);
 
     try {
         const tokens = await view.webContents.executeJavaScript(`
@@ -211,19 +212,19 @@ async function generateRecaptchaTokens(count = 1) {
             })()
         `);
 
-        console.log(`[RECAPTCHA] ✅ ${tokens.length} token(s) generated.`);
+        console.log(`[RECAPTCHA-IMG] ✅ ${tokens.length} token(s) generated.`);
         return tokens;
 
     } catch (err) {
-        console.error('[RECAPTCHA] ❌ Token generation failed, resetting:', err.message);
-        _state = null;
+        console.error('[RECAPTCHA-IMG] ❌ Token generation failed, resetting:', err.message);
+        _stateImg = null;
         try { if (!state.win.isDestroyed()) state.win.destroy(); } catch (_) { }
         throw err;
     }
 }
 
-async function generateRecaptchaToken() {
-    const tokens = await generateRecaptchaTokens(1);
+async function generateRecaptchaTokenImg() {
+    const tokens = await generateRecaptchaTokensImg(1);
     return tokens[0];
 }
 
@@ -253,7 +254,7 @@ async function simulatePreExecuteAction(webContents) {
         // Human-like pause sebelum "click"
         await delay(500 + Math.random() * 2000);
 
-        console.log('[RECAPTCHA] 🎯 Pre-execute interaction done.');
+        console.log('[RECAPTCHA-IMG] 🎯 Pre-execute interaction done.');
     } catch (err) {
         // Non-fatal
     }
@@ -359,9 +360,9 @@ async function injectFingerprintSpoofing(webContents) {
                 Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
             })();`
         });
-        console.log('[RECAPTCHA] 🛡️  Fingerprint spoofing injected (BEFORE page load)');
+        console.log('[RECAPTCHA-IMG] 🛡️  Fingerprint spoofing injected (BEFORE page load)');
     } catch (err) {
-        console.warn('[RECAPTCHA] ⚠️  Fingerprint spoofing gagal (non-fatal):', err.message);
+        console.warn('[RECAPTCHA-IMG] ⚠️  Fingerprint spoofing gagal (non-fatal):', err.message);
     }
 }
 
@@ -387,4 +388,4 @@ function waitForRecaptcha(webContents, timeoutMs) {
 
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-module.exports = { generateRecaptchaToken, generateRecaptchaTokens, destroyBrowser };
+module.exports = { generateRecaptchaTokenImg, generateRecaptchaTokensImg, destroyBrowserImg };
