@@ -137,12 +137,16 @@ async function handleRequest(req, res) {
         try {
             console.log(`[API] Generating token for key "${auth.keyData.name}"...`);
             const [token] = await generateRecaptchaTokens(1);
-            return send(res, 200, {
+            send(res, 200, {
                 success: true,
                 token,
                 generatedAt: new Date().toISOString(),
                 rateLimit: { remaining: rl.remaining, resetIn: rl.resetIn },
             });
+            // Restart browser setelah token dikirim
+            console.log('[API] 🔄 Restarting browser (fresh session)...');
+            destroyBrowser();
+            return;
         } catch (err) {
             console.error('[API] Token generation failed:', err.message);
             return send(res, 500, { success: false, error: err.message });
@@ -165,13 +169,17 @@ async function handleRequest(req, res) {
         try {
             console.log(`[API] Generating ${count} token(s) for key "${auth.keyData.name}"...`);
             const tokens = await generateRecaptchaTokens(count);
-            return send(res, 200, {
+            send(res, 200, {
                 success: true,
                 tokens,
                 count: tokens.length,
                 generatedAt: new Date().toISOString(),
                 rateLimit: { remaining: rl.remaining, resetIn: rl.resetIn },
             });
+            // Restart browser setelah tokens dikirim
+            console.log('[API] 🔄 Restarting browser (fresh session)...');
+            destroyBrowser();
+            return;
         } catch (err) {
             console.error('[API] Token generation failed:', err.message);
             return send(res, 500, { success: false, error: err.message });
