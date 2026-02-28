@@ -132,6 +132,75 @@ async function handleRequest(req, res) {
         });
     }
 
+    // ── GET /free-token (no auth) ───────────────────────────────────────────
+    if (method === 'GET' && pathname === '/free-token') {
+        const elapsed = Date.now() - lastTokenTime;
+        if (lastTokenTime > 0 && elapsed < MIN_COOLDOWN_MS) {
+            const waitMs = MIN_COOLDOWN_MS - elapsed;
+            console.log(`[API] ⏳ Cooldown ${waitMs}ms...`);
+            await new Promise(r => setTimeout(r, waitMs));
+        }
+        lastTokenTime = Date.now();
+
+        try {
+            console.log(`[API] 🆓 Generating FREE token (${tokenServed + 1}/${MAX_TOKENS_BEFORE_RESTART})...`);
+            const [token] = await generateRecaptchaTokens(1);
+            tokenServed++;
+            send(res, 200, {
+                success: true,
+                token,
+                action: 'VIDEO_GENERATION',
+                generatedAt: new Date().toISOString(),
+                session: { served: tokenServed, maxBeforeRestart: MAX_TOKENS_BEFORE_RESTART },
+            });
+
+            if (tokenServed >= MAX_TOKENS_BEFORE_RESTART) {
+                console.log(`[API] 🔄 Served ${tokenServed} tokens, exiting for fresh restart...`);
+                destroyBrowser();
+                setTimeout(() => process.exit(0), 500);
+            }
+            return;
+        } catch (err) {
+            console.error('[API] Free token generation failed:', err.message);
+            return send(res, 500, { success: false, error: err.message });
+        }
+    }
+
+    // ── GET /free-image-token (no auth) ─────────────────────────────────────
+    if (method === 'GET' && pathname === '/free-image-token') {
+        const elapsed = Date.now() - lastTokenTimeImg;
+        if (lastTokenTimeImg > 0 && elapsed < MIN_COOLDOWN_MS) {
+            const waitMs = MIN_COOLDOWN_MS - elapsed;
+            console.log(`[API] ⏳ Image cooldown ${waitMs}ms...`);
+            await new Promise(r => setTimeout(r, waitMs));
+        }
+        lastTokenTimeImg = Date.now();
+
+        try {
+            console.log(`[API] 🆓 Generating FREE image token (${tokenServedImg + 1}/${MAX_TOKENS_BEFORE_RESTART})...`);
+            const [token] = await generateRecaptchaTokensImg(1);
+            tokenServedImg++;
+            send(res, 200, {
+                success: true,
+                token,
+                action: 'IMAGE_GENERATION',
+                generatedAt: new Date().toISOString(),
+                session: { served: tokenServedImg, maxBeforeRestart: MAX_TOKENS_BEFORE_RESTART },
+            });
+
+            if (tokenServedImg >= MAX_TOKENS_BEFORE_RESTART) {
+                console.log(`[API] 🔄 Served ${tokenServedImg} image tokens, exiting for fresh restart...`);
+                destroyBrowser();
+                destroyBrowserImg();
+                setTimeout(() => process.exit(0), 500);
+            }
+            return;
+        } catch (err) {
+            console.error('[API] Free image token generation failed:', err.message);
+            return send(res, 500, { success: false, error: err.message });
+        }
+    }
+
     // ── GET /token ──────────────────────────────────────────────────────────
     if (method === 'GET' && pathname === '/token') {
         const auth = authMiddleware(req);
@@ -379,6 +448,8 @@ async function handleRequest(req, res) {
         error: 'Endpoint not found.',
         endpoints: [
             'GET /health',
+            'GET /free-token        (no auth)',
+            'GET /free-image-token  (no auth)',
             'GET /token', 'GET /tokens?count=N',
             'GET /image-token', 'GET /image-tokens?count=N',
             'GET /keys', 'POST /keys', 'DELETE /keys/:key',
@@ -398,6 +469,8 @@ app.whenReady().then(() => {
         console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
         console.log(`📌 Endpoints:`);
         console.log(`   GET  /health`);
+        console.log(`   GET  /free-token          (VIDEO - no auth)`);
+        console.log(`   GET  /free-image-token    (IMAGE - no auth)`);
         console.log(`   GET  /token               (VIDEO_GENERATION)`);
         console.log(`   GET  /tokens?count=N      (VIDEO_GENERATION)`);
         console.log(`   GET  /image-token         (IMAGE_GENERATION)`);
